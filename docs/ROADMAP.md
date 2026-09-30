@@ -1,6 +1,6 @@
 # CommerceFabric Roadmap
 
-Status: planning draft. Implementation has not started.
+Status: Milestone 1 planning package complete and ready for final owner review. Its overall design and version policy were accepted on 2026-09-30. Implementation has not started.
 
 This roadmap translates the [master plan](../CommerceFabric_Master_Plan.md) into 15 milestones with bounded scope and reviewable completion criteria. CommerceFabric is a learning project. Each milestone should produce a working demonstration, test evidence, and an explanation of the decisions and failures encountered.
 
@@ -286,15 +286,17 @@ Logical replication needs separate schema coordination and has limitations aroun
 | 11–13 | pgvector, MLflow, Langfuse, model/LLM tooling | Evaluated recommendation, forecasting, and customer AI |
 | 15 | k6, Trivy, selected chaos tools, PostgreSQL replication/recovery tools | Performance, delivery, and operational simulation |
 
-Runtime/library versions are recorded in the detailed plan for the milestone introducing them, then pinned before implementation. Future Python, Go, broker, and cloud versions are not chosen prematurely.
+Use latest stable runtime/library/tool versions when each milestone introduces them, checking compatibility before proceeding. Milestone 1's [matrix](technology/milestone-01.md) records the owner-approved TypeScript 6.0.3 exception; current Swagger/lint tooling excludes TypeScript 7. Pin selected versions and lockfiles during authorized setup. Future Python, Go, broker, and cloud versions are not chosen prematurely.
 
 ## Planning status and next action
 
 - [x] Overall project goal documented in the master plan.
 - [x] Milestone scope and database learning progression drafted here.
 - [x] Milestone 1 design drafted in its detailed plan.
-- [ ] Review Milestone 1's proposed decisions with the project owner.
-- [ ] Resolve its open questions and finalize the version compatibility matrix.
+- [x] Owner accepts Milestone 1's overall scope and design baseline.
+- [x] Complete its detailed API contracts, ADRs, database operations plan, and documentation consistency review.
+- [x] Record exact versions, metadata compatibility, and the approved TypeScript exception.
+- [ ] Owner completes final review of the detailed planning refinements.
 - [ ] Authorize Milestone 1 implementation explicitly.
 
 Only the first milestone has a detailed database model. Later milestone documents will be written when they become active.

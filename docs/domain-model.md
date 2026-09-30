@@ -2,9 +2,11 @@
 
 Scope: Milestone 01 — Microservices Foundation.
 
-Status: planning draft for review. This document describes the business concepts and rules for the first commerce flow. It does not authorize implementation or design future milestones' databases.
+Status: supporting domain model for the overall Milestone 1 design accepted on 2026-09-30. Supporting contracts, ADRs, and a documentation consistency review are recorded; detailed refinements are ready for final owner review. This document does not authorize implementation or design future milestones' databases.
 
 Related documents: [Roadmap](ROADMAP.md), [Milestone 01 design](milestone-01.md), and [Master Plan](../CommerceFabric_Master_Plan.md).
+
+Detailed wire formats and caller rules: [API contracts](api-contracts/milestone-01.md). Decision rationale: [ADRs](adr/README.md).
 
 ## 1. Purpose and document boundaries
 
@@ -110,6 +112,8 @@ A pending order may have no reservation decision yet, or a committed decision wh
 | Submission key | 1–128 printable ASCII characters; unique per customer |
 | Request identity | Hash of a normalized, sorted product-ID/quantity list; no client price or server-derived price included |
 | Timestamp | UTC instant; creation time stays fixed |
+
+SKU input is trimmed and uppercased, then validated as `[A-Z0-9][A-Z0-9._-]{0,63}`. Submission keys must not have leading/trailing whitespace. These refinements make canonical identity and retry behavior explicit in the API contract.
 
 Use integer arithmetic for money. API money values are decimal strings representing minor units: `"2599"` means USD 25.99. Currency accompanies the amount. This avoids treating the string as a dollar amount or calculating prices with floating-point arithmetic.
 
@@ -242,5 +246,5 @@ Moving Product's database to another server should preserve Product ownership, i
 - [ ] Confirm the distinction between accepted, pending, and confirmed orders.
 - [ ] Confirm immutable catalog snapshots and the archive/price race semantics.
 - [ ] Confirm cancellation, expiry, and fulfillment remain outside Milestone 01.
-- [ ] Check the domain rules against the milestone's schema, API, and failure tests.
-- [ ] Capture approved ownership and recovery decisions in ADRs before implementation.
+- [x] Check the domain rules against the planned schema, API, and failure-test specifications.
+- [x] Record accepted ownership and recovery decisions in ADRs.

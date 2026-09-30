@@ -10,9 +10,11 @@ CommerceFabric uses product catalogs, inventory reservations, orders, and notifi
 
 The [CommerceFabric Master Plan](CommerceFabric_Master_Plan.md) is the source of truth for the overall goal, detailed phases, experiments, and milestone checklists.
 
-Planning uses two layers: the [Roadmap](docs/ROADMAP.md) defines all milestone scopes, dependencies, and completion criteria; the [Milestone 1 plan](docs/milestone-01.md) details the first flow, service boundaries, database model, contracts, technology choices, and tests. Database schemas are designed only for the active milestone. Database migrations, relocation, scaling, and recovery are explicit learning tracks throughout the roadmap. These documents are planning drafts; implementation awaits design review and authorization.
+Planning uses two layers: the [Roadmap](docs/ROADMAP.md) defines all milestone scopes, dependencies, and completion criteria; the [Milestone 1 plan](docs/milestone-01.md) details the first flow, service boundaries, database model, contracts, technology choices, and tests. Database schemas are designed only for the active milestone. Database migrations, relocation, scaling, and recovery are explicit learning tracks throughout the roadmap. Milestone 1's planning package is complete and ready for final owner review; implementation awaits explicit authorization.
 
 The [Domain Model](docs/domain-model.md) explains Milestone 1's entities, ownership, relationships, state transitions, and business invariants, with worked examples.
+
+Supporting planning artifacts: [API contracts](docs/api-contracts/milestone-01.md), [ADRs](docs/adr/README.md), [version matrix](docs/technology/milestone-01.md), [database operations](docs/runbooks/milestone-01-database-operations.md), and [consistency review](docs/reviews/milestone-01-planning.md). The stack uses latest stable releases with one approved TypeScript compatibility exception; published metadata checks do not replace later build/runtime verification.
 
 ## Learning approach
 

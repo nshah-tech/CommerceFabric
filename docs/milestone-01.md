@@ -1,10 +1,12 @@
 # Milestone 01 — Microservices Foundation
 
-Status: planning draft, pending owner review. No implementation is authorized by this document.
+Status: planning package complete and ready for final owner review. The overall design and latest-stable version policy, with the TypeScript exception, were accepted on 2026-09-30. Detailed API and operational refinements are documented below. Implementation has not been authorized.
 
 Parent: [Roadmap](ROADMAP.md). Overall goal: [Master Plan](../CommerceFabric_Master_Plan.md).
 
 Business concepts, entity relationships, lifecycle rules, and worked examples are documented in the [Domain Model](domain-model.md). This plan defines their database and implementation design; keep the two documents consistent as decisions are reviewed.
+
+Supporting specifications: [API contracts](api-contracts/milestone-01.md), [architecture decisions](adr/README.md), [exact versions and compatibility evidence](technology/milestone-01.md), [database operations](runbooks/milestone-01-database-operations.md), and [planning consistency review](reviews/milestone-01-planning.md).
 
 ## 1. Goal and learning outcomes
 
@@ -82,6 +84,8 @@ flowchart LR
 
 Each business service has an application role restricted to its database and DML operations. A separate migration role owns DDL permissions. Explicitly remove broad database/schema grants where needed; test negative access across service databases. Bootstrap administration credentials never go into service runtime configuration.
 
+Runtime permissions are restricted per table: catalog archival is an update, order/reservation history cannot be deleted, and immutable lines are read/insert only. The [database operations plan](runbooks/milestone-01-database-operations.md) defines the role permissions and startup order.
+
 A single server remains a shared failure and resource boundary. Separating logical databases establishes ownership; Milestone 09 will move one database to another server.
 
 Foreign keys exist only within an owned database. Product UUIDs in Inventory and Order are external references, validated through APIs where required. No cross-database joins, views, ORM entities, or distributed foreign keys.
@@ -114,6 +118,7 @@ Browsing stock is informational. Reservation is the authoritative availability d
 - `created_at` is immutable. `updated_at` is updated by the owning application in the same transaction as changes.
 - Financial snapshots and order lines are immutable after order acceptance. No cross-database cascading deletion.
 - Each database includes its own TypeORM migration-history table. Seed data is not mixed into schema history.
+- Product SKU shape, money-string representation, request normalization, and error codes are defined in the [API contracts](api-contracts/milestone-01.md).
 
 ```mermaid
 erDiagram
@@ -199,6 +204,8 @@ There is deliberately no stock-item FK from reservation lines: an unknown stock 
 
 Invariant: for each product, `reserved` equals the sum of quantities in `RESERVED` reservations. This aggregate invariant is enforced by service transactions and verified by reconciliation tests; a normal row check cannot express it across tables.
 
+Reservation rejection codes are `STOCK_NOT_REGISTERED` and `INSUFFICIENT_STOCK`; a rejected decision requires one, while a successful decision has none. Missing stock takes precedence over insufficient stock when both conditions occur in a request. Enforce valid state/code combinations with local database checks.
+
 ### Order database
 
 | Table | Fields and rules | Indexes / operations |
@@ -209,6 +216,8 @@ Invariant: for each product, `reserved` equals the sum of quantities in `RESERVE
 Line totals are derived from snapshot price × quantity. The order total is calculated by Order using integer arithmetic and saved with lines in one transaction. Verify that it equals the sum of line totals; it is not a cross-row database check. The maximum permitted cart bounds fit PostgreSQL bigint; serialize all money values as strings.
 
 `customer_id` references a verified development token subject. There is no customer table, password store, shipping address, payment record, or future AI schema in this design.
+
+Initial orders are pending with recovery count zero and a non-null next recovery time. Terminal updates clear the next recovery time. Rejected orders require one of Inventory's rejection codes; pending/confirmed orders have none. Validate these local state/field combinations in database checks. Bound `total_minor` to 0–200,000,000,000 cents, consistent with the maximum line count, unit price, and quantity.
 
 ## 6. Order and reservation protocol
 
@@ -310,7 +319,7 @@ The local admin can use the product/stock screens; order access is scoped to cus
 | Inventory | `POST /internal/v1/reservations` | Order submits order ID and bounded item list |
 | Inventory | `GET /internal/v1/reservations/by-order/:orderId` | Order checks the durable reservation decision |
 
-Define explicit required fields, bounds, rejection codes, examples, auth schemes, and response shapes in the implementation's OpenAPI artifacts. Internal product lookup returns either all requested active products or a validation error; there is no partial accepted order.
+The [detailed API specification](api-contracts/milestone-01.md) defines required fields, bounds, rejection codes, examples, auth schemes, response shapes, cursor semantics, and operational endpoints. During implementation, produce OpenAPI 3.0.3 artifacts from that specification. Internal product lookup returns either all requested active products or a validation error; there is no partial accepted order.
 
 ### Responses and semantics
 
@@ -321,10 +330,15 @@ Define explicit required fields, bounds, rejection codes, examples, auth schemes
 - Standard error fields: stable `code`, safe `message`, `requestId`, optional field-validation details, and optional accepted order ID/status. Never expose SQL, credentials, or another customer's data.
 - List responses use `items` and opaque `nextCursor`; default limit 20, maximum 100, stable `(created_at, id)` ordering. An empty page is a valid result.
 - Unknown request fields are rejected; product names and prices from the browser never override server snapshots.
+- A Gateway 503 or lost connection can occur after Order accepts the submission without Gateway learning its ID; retry the original key rather than assuming no commit.
+- Internal reservation creation returns 201 for a new durable decision, including rejection, and 200 for an identical repeat. Order inspects the decision status; public rejection remains 409 with the persisted order in the error envelope.
+- Lists sort descending by `(created_at, id)` with bounded, integrity-protected resource/customer-scoped cursors.
 
 ## 8. Authentication and local identities
 
 Use short-lived signed development tokens containing a UUID subject, role, issuer, audience, and expiry. Generate two customer identities and one admin identity locally. Verify tokens at Gateway and business service boundaries; derive order ownership from verified claims. Do not trust browser-supplied identity headers.
+
+The [identity/API ADR](adr/006-api-and-local-identity.md) and contracts define RS256, exact issuer/audience checks, credential-header separation, role allowlists, CORS, and safe error/log conventions. These are detailed refinements of the local-identity baseline, ready for owner review.
 
 Use separate per-caller credentials and endpoint allowlists for Order-to-Product/Inventory and Inventory-to-Product calls. Keep user authorization and service authentication as distinct checks. Development credentials are local configuration, not hardcoded secrets or committed token files. Services bind to localhost in this milestone; service-to-service HTTP is a local learning setup. TLS, credential rotation, and production identity integration need later plans.
 
@@ -334,25 +348,25 @@ The UI may offer a clearly labeled development identity selector. It loads local
 
 | Area | Proposed choice | Planning detail |
 | --- | --- | --- |
-| Runtime | Node.js 24 LTS | Pin a supported patch satisfying all framework/CLI/test constraints |
-| Services | NestJS with TypeScript | Current Nest 12 / TypeScript 6 is the candidate baseline; review ecosystem compatibility before freezing versions |
+| Runtime / package manager | Node.js 26.10.0 / npm 12.1.0 | Latest stable current runtime and package manager; replaces the earlier Node 24 LTS proposal |
+| Services | NestJS 12.1.1 with TypeScript 6.0.3 | TypeScript is the approved exception: latest 7.0.2 is outside Swagger/lint peer ranges |
 | HTTP adapter | Nest's Express adapter | One adapter across the initial services |
-| Database | PostgreSQL 18 | Pin a supported minor release/container digest; no beta database |
-| Data access | TypeORM with PostgreSQL driver | Explicit transactions and reviewed migrations; verify Nest adapter/driver peer compatibility |
+| Database | PostgreSQL 18.6 | Current stable minor; platform image digest captured during authorized setup |
+| Data access | TypeORM 1.1.1, Nest adapter 12.0.2, pg 8.23.0 | Published engine/peer ranges checked; explicit transactions and reviewed migrations |
 | Validation/contracts | Nest validation and Swagger/OpenAPI tooling | Use explicit DTOs and runtime bounds, not ORM entities as API contracts |
-| Frontend | React with TypeScript, Vite | Minimal catalog, stock administration, submission, order list/detail |
+| Frontend | React 19.3.0, Vite 8.3.1 | Minimal catalog, stock administration, submission, order list/detail |
 | Workspace | npm workspaces | Independent service packages and lockfile; no Nx/Turborepo initially |
-| Tests | Jest, Supertest, Testcontainers, Playwright | Pin Jest 30-compatible tooling if adopting Nest 12; validate the chosen module format |
+| Tests | Jest 30.5.2, SWC, Supertest, Testcontainers, Playwright | Exact versions and native/runtime verification boundaries are in the matrix |
 | Formatting | ESLint and Prettier | Focused workspace scripts; keep formatting separate from generated contracts |
-| Logs/traces | Structured JSON logger; OpenTelemetry | Request/trace IDs, safe fields; one local trace viewer when needed |
+| Logs/traces | Pino; OpenTelemetry | Safe fields, correlated console span export initially; OTLP backend optional later |
 | Local infrastructure | Docker Compose and Make | Compose starts PostgreSQL first; services initially run as local processes |
 | CI | GitHub Actions | Lint/typecheck/build, contracts, unit/API and real-PostgreSQL tests, selected E2E |
 
-Choose one module format across the initial backend packages after the version compatibility check; CommonJS is the proposed starting point to keep the master plan's Jest workflow. Current Nest documentation describes ESM-only framework packages and additional runtime requirements for CLI and Jest interoperability. Verify this combination rather than copying historical scaffolding defaults. [Nest migration guide](https://docs.nestjs.com/migration-guide)
+Backend packages use CommonJS with explicit package format, NodeNext resolution, ES2023 target, and decorator metadata; Jest uses matching SWC decorator transformation with separate TypeScript typechecks. Frontend uses ESM/Vite. Selected Node meets Nest's documented interop requirements. Runtime verification is a Stage A gate. [Nest migration guide](https://docs.nestjs.com/migration-guide)
 
-Node 24 is an LTS line according to the official release schedule. [Node release schedule](https://github.com/nodejs/Release)
+The owner chose latest stable releases rather than limiting Node to an LTS line. TypeScript 6.0.3 is the sole approved version exception. Future milestone tooling is selected when introduced, with new compatibility conflicts surfaced before proceeding.
 
-Before implementation approval, record exact compatible versions for Node, Nest packages/CLI, TypeScript, TypeORM/adapter/driver, React/Vite, and test tooling. This remains an explicit planning gate; future Python/Go versions are deferred to Milestone 10.
+The [version matrix](technology/milestone-01.md) records exact packages, sources, 29 Node engine checks and 43 peer-range checks over 48 packages, with no declared selected conflicts. Metadata compatibility is distinct from installation/build/runtime proof. No dependency installation has occurred; actual clean resolution, native tools, and module/ORM behavior are checked after implementation authorization. Future Python/Go versions are deferred to Milestone 10.
 
 ## 10. Planned project structure
 
@@ -366,7 +380,11 @@ CommerceFabric/
 ├── docs/
 │   ├── ROADMAP.md
 │   ├── milestone-01.md
-│   ├── adr/                 Small decision records when the design is approved
+│   ├── domain-model.md
+│   ├── adr/                 Initial decisions recorded; extend when needed
+│   ├── api-contracts/       Detailed planning contracts
+│   ├── technology/          Version selections and metadata evidence
+│   ├── reviews/             Planning consistency and later evidence
 │   ├── experiments/         Hypothesis, setup, results, lessons
 │   └── runbooks/            Migrations, restore, pending-order recovery
 ├── services/
@@ -419,7 +437,7 @@ Migration status, backup, and restore tasks will receive explicit target/environ
 1. Each owning service keeps an ordered, immutable migration history. Disable ORM auto-synchronization in development, tests, and deployment.
 2. Create each initial database schema through migrations, including constraints and indexes. Tests must run the same history rather than auto-creating entities.
 3. Review generated DDL, its lock requirements, and data effects. Apply migrations through a deliberate task with the owning migration role; services do not migrate on startup.
-4. Execute only one migration runner per database at a time; enforce a runner lock and timeout. Independent databases still have separate histories and compatibility requirements.
+4. Execute only one migration runner per database at a time; use a controlled compiled TypeORM runner holding a session lock on its migration QueryRunner connection. Independent databases still have separate histories and compatibility requirements. Verify the runner integration in Stage A; do not assume separate CLI connections share advisory-lock protection.
 5. Record application/schema compatibility and migration status before starting services. Incompatible schema makes readiness fail with an actionable diagnostic.
 6. Never edit an already-applied migration to hide drift; add a corrective migration.
 
@@ -436,6 +454,8 @@ Application rollback and schema rollback are different: an additive schema can u
 ### Backup and restore exercise
 
 Create logical backups of all three owned databases from a quiesced synthetic environment so cross-service state is consistent. Include a documented way to recreate roles/grants; per-database dumps alone are not the entire server configuration. Restore to a separate PostgreSQL instance, then verify row counts, keys/constraints, order snapshots, stock/reservation invariants, and the customer flow. Record backup and restore durations. [PostgreSQL logical backups](https://www.postgresql.org/docs/18/backup-dump.html)
+
+Quiescing includes blocking public writes, pausing Order reconciliation, and draining in-flight transactions. Detailed setup, migration runner, restore, pool budgeting, and recovery procedures are in the [database operations plan](runbooks/milestone-01-database-operations.md).
 
 The first exercise has a maintenance window. Independently dumping live databases does not prove a consistent system-wide recovery point. Recovery while writes continue and point-in-time recovery are later milestone topics.
 
@@ -470,6 +490,8 @@ Read replicas, PgBouncer, partitioning, sharding, online relocation, and major-v
 | Browser flow | Admin setup → customer browse → submit → own order detail; pending UI polls without resubmission |
 | Telemetry | Safe structured logs and correlation across Gateway → Order → Inventory; dependency errors visible |
 
+Concurrency acceptance counts are evaluated after pending work converges and transient failures are retried with their original identities. Individual HTTP timeouts are not counted as business rejections. The 100-order test uses distinct keys; the duplicate-submit test uses one key and one unchanged payload.
+
 Tests involving SQL locking, transactions, constraints, or migrations use real PostgreSQL through Testcontainers. Repository mocks alone cannot prove these properties. Failure injection must simulate the precise commit/response boundary, not merely an arbitrary HTTP error.
 
 For every experiment record: question, hypothesis, environment/versions, data setup, expected behavior, observed evidence, explanation, and follow-up. Record unsuccessful hypotheses too.
@@ -489,7 +511,7 @@ Stages describe future work. No service scaffolding, SQL migration, application 
 
 ## 14. Planning review and completion checklist
 
-### Decisions for owner review
+### Accepted design baseline and completed detailed planning
 
 | Question | Proposed default | Why review it now |
 | --- | --- | --- |
@@ -499,9 +521,9 @@ Stages describe future work. No service scaffolding, SQL migration, application 
 | Are cancellation and reservation expiry deferred? | Yes, to 02 | Keeps recovery deterministic; confirmed stock remains reserved in 01 |
 | How much frontend? | Minimal working catalog, admin controls, submission, own orders | Makes the system observable through a user flow |
 | Are local synthetic identities sufficient? | Yes | Allows authorization learning without an identity-service milestone |
-| Version compatibility | Candidate Node 24 / Nest 12 / TypeScript 6; exact matrix to finalize | Avoids starting with incompatible scaffolding/testing packages |
+| Version compatibility | Node 26.10.0, Nest 12.1.1, TypeORM 1.1.1; approved TypeScript 6.0.3 exception | Exact metadata compatibility recorded; runtime verification remains in Stage A |
 
-Defaults are proposals, not unanswered questions hidden behind implementation assumptions. Any changed decision must update affected contracts, database rules, tests, and roadmap scope before coding.
+The owner accepted the overall Milestone 1 plan and the latest-stable policy with the TypeScript exception on 2026-09-30. The scope and domain defaults above form the accepted baseline. Detailed contract and operational refinements are ready for final owner review. Any changed decision must update affected contracts, database rules, tests, and roadmap scope before coding.
 
 ### Planning completion
 
@@ -510,10 +532,12 @@ Defaults are proposals, not unanswered questions hidden behind implementation as
 - [x] Order/concurrency/recovery behavior drafted.
 - [x] Project layout and technology choices proposed.
 - [x] Migration, restore, scaling-baseline, and test exercises defined.
-- [ ] Owner reviews and settles the proposed decisions above.
-- [ ] Exact dependency versions and module-format compatibility are recorded.
-- [ ] Approved decisions are captured in small ADRs for boundaries, database ownership, order recovery, migrations, and initial tooling.
-- [ ] Remaining design contradictions are resolved and this document marked approved.
+- [x] Owner accepts the overall scope and design baseline.
+- [x] Detailed API contracts include request/response examples, validation, authorization, and errors.
+- [x] Exact dependency versions, approved exception, metadata checks, and module format are recorded.
+- [x] Baseline decisions and detailed refinements are recorded in ADRs with explicit status.
+- [x] Documentation consistency reviewed and identified contradictions resolved.
+- [ ] Owner completes final review of the detailed planning refinements.
 - [ ] Owner explicitly authorizes implementation.
 
 ### Milestone completion after implementation
